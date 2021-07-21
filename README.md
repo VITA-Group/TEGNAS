@@ -11,7 +11,7 @@ Wuyang Chen, Xinyu Gong, Yunchao Wei, Humphrey Shi, Zhicheng Yan, Yi Yang, and Z
 
 **Note**
 1. This repo is still under development. Scripts are excutable but some CUDA errors may occur.
-2. Due to IP issue, we can only release the code for NAS via reinforcement learning and evolution, but not ProbNAS.
+2. Due to IP issue, we can only release the code for NAS via reinforcement learning and evolution, but not FP-NAS.
 
 
 ## Overview
