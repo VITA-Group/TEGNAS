@@ -1,5 +1,5 @@
 <!-- # Understanding and Accelerating NeuralArchitecture Search with Training-Free andTheory-Grounded Metrics [[PDF](https://arxiv.org/pdf/2102.11535.pdf)] -->
-# Understanding and Accelerating NeuralArchitecture Search with Training-Free andTheory-Grounded Metrics
+# Understanding and Accelerating Neural Architecture Search with Training-Free and Theory-Grounded Metrics
 
 <!-- [![Language grade: Python](https://img.shields.io/lgtm/grade/python/g/VITA-Group/TENAS.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/VITA-Group/TENAS/context:python) -->
 [![MIT licensed](https://img.shields.io/badge/license-MIT-brightgreen.svg)](LICENSE.md)
@@ -103,7 +103,7 @@ python evolution_launch.py --space darts --dataset imagenet-1k --gpu 0
 ## Citation
 ```
 @inproceedings{chen2021tegnas,
-  title={Understanding and Accelerating NeuralArchitecture Search with Training-Free andTheory-Grounded Metrics},
+  title={Understanding and Accelerating Neural Architecture Search with Training-Free and Theory-Grounded Metrics},
   author={Chen, Wuyang and Gong, Xinyu and Wei, Yunchao and Shi, Humphrey and Yan, Zhicheng and Yang, Yi and Wang, Zhangyang},
   year={2021}
 }
