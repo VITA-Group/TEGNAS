@@ -47,7 +47,7 @@ Highlights:
 ## Prerequisites
 - Ubuntu 16.04
 - Python 3.6.9
-- CUDA 11.10 (lower versions may work but were not tested)
+- CUDA 11.0 (lower versions may work but were not tested)
 - NVIDIA GPU + CuDNN v7.6
 
 This repository has been tested on GTX 1080Ti. Configurations may need to be changed on different platforms.
