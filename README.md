@@ -17,7 +17,7 @@ Wuyang Chen, Xinyu Gong, Yunchao Wei, Humphrey Shi, Zhicheng Yan, Yi Yang, and Z
 ## Overview
 
 
-We present TEG-NAS, a generalized training-free neural architecture search method that can significantly boost time cost of popular search methods (no gradient descent at all!) with high-quality performance.
+We present TEG-NAS, a generalized training-free neural architecture search method that can significantly reduce time cost of popular search methods (no gradient descent at all!) with high-quality performance.
 
 Highlights:
 * **Trainig-free NAS**: for three popular NAS methods (Reinforcement Learning, Evolution, Differentiable), we adopt our TEG-NAS method into them and achieved extreme fast neural architecture search without a single gradient descent.
@@ -47,7 +47,7 @@ Highlights:
 ## Prerequisites
 - Ubuntu 16.04
 - Python 3.6.9
-- CUDA 11.10(lower versions may work but were not tested)
+- CUDA 11.10 (lower versions may work but were not tested)
 - NVIDIA GPU + CuDNN v7.6
 
 This repository has been tested on GTX 1080Ti. Configurations may need to be changed on different platforms.
