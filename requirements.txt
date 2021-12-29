@@ -1,7 +1,0 @@
-torch==1.9.0
-numpy==1.18.5
-tqdm==4.46.1
-torchvision==0.10.0
-thop
-easydict==1.9
-Pillow==7.1.2
