@@ -25,6 +25,7 @@ def get_ntk_n(loader, networks, loader_val=None, train_mode=False, num_batch=-1,
         for net_idx, network in enumerate(networks):
             network.zero_grad()
             inputs_ = inputs.clone().cuda(device=device, non_blocking=True)
+            # print(inputs_.shape)
             logit = network(inputs_)
             if isinstance(logit, tuple):
                 logit = logit[1]  # 201 networks: return features and logits
@@ -67,8 +68,10 @@ def get_ntk_n(loader, networks, loader_val=None, train_mode=False, num_batch=-1,
     if loader_val is not None:
         for i, (inputs, targets) in enumerate(loader_val):
             if num_batch > 0 and i >= num_batch: break
-            inputs = inputs.cuda(device=device, non_blocking=True)
-            targets = targets.cuda(device=device, non_blocking=True)
+            # inputs = inputs.cuda(device=device, non_blocking=True)
+            # targets = targets.cuda(device=device, non_blocking=True)
+            inputs = inputs.cuda()
+            targets = targets.cuda()
             targets_onehot = torch.nn.functional.one_hot(targets, num_classes=num_classes).float()
             targets_onehot_mean = targets_onehot - targets_onehot.mean(0)
             targets_y_onehot_mean.append(targets_onehot_mean)
@@ -96,6 +99,9 @@ def get_ntk_n(loader, networks, loader_val=None, train_mode=False, num_batch=-1,
             grads = torch.stack(grads, 0)
             cellgrads_y[_i] = grads
         for net_idx in range(len(networks)):
+            # _ntk_yx = torch.einsum('nc,mc->nm', [cellgrads_y[net_idx], cellgrads_x[net_idx]])
+            # PY = torch.einsum('jk,kl,lm->jm', _ntk_yx, torch.inverse(ntk_cell_x[net_idx]), targets_x_onehot_mean)
+            # prediction_mses.append(((PY - targets_y_onehot_mean) ** 2).sum(1).mean(0).item())
             try:
                 _ntk_yx = torch.einsum('nc,mc->nm', [cellgrads_y[net_idx], cellgrads_x[net_idx]])
                 PY = torch.einsum('jk,kl,lm->jm', _ntk_yx, torch.inverse(ntk_cell_x[net_idx]), targets_x_onehot_mean)

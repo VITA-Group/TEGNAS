@@ -7,7 +7,39 @@ from torch import nn
 from procedures import Linear_Region_Collector, get_ntk_n
 from models       import get_cell_based_tiny_net, get_search_spaces, nas_super_nets
 from pdb import set_trace as bp
-from typing import List, Dict, Tuple, Any, Optional  # noqa 401
+from typing import List, Dict, Tuple, Any, Optional
+
+from models.nasbench101 import Network
+from models.nasbench101 import ModelSpec
+
+matrix = [[0, 1, 1, 1, 0, 1, 0],
+          [0, 0, 0, 0, 0, 0, 1],
+          [0, 0, 0, 0, 0, 0, 1],
+          [0, 0, 0, 0, 1, 0, 0],
+          [0, 0, 0, 0, 0, 0, 1],
+          [0, 0, 0, 0, 0, 0, 1],
+          [0, 0, 0, 0, 0, 0, 0]]
+
+operations = ['input', 'conv1x1-bn-relu', 'conv3x3-bn-relu', 'conv3x3-bn-relu', 'conv3x3-bn-relu',
+              'maxpool3x3', 'output']
+
+index2ops_101 = {0: 'input',
+            1: 'conv1x1-bn-relu',
+            2: 'conv3x3-bn-relu',
+            3: 'maxpool3x3',
+            4: 'output'
+            }
+
+# ops_dict = {'input': 0,
+#             'conv1x1-bn-relu': 1,
+#             'conv3x3-bn-relu': 2,
+#             'maxpool3x3': 3,
+#             'output': 4,
+# }
+
+spec = ModelSpec(matrix, operations)
+net = Network(spec, num_labels=10, in_channels=3, stem_out_channels=128, num_stacks=3, num_modules_per_stack=3)
+# noqa 401
 
 op2index_201 = {
     'none': 0,
@@ -71,6 +103,8 @@ class Buffer_Reward_Generator(object):
         # self.__super__()
         self.reward_type2index = reward_type2index
         self._reward_types = ["ntk", "region", "mse"]
+        # self._reward_types = ["ntk", "mse"]
+        # self._reward_types = ["ntk"]
         self._reward_sign = {"ntk": -1, "mse": -1, "region": 1} # ntk/mse: lower the better; region: higher the better
         self._buffers = {key: [] for key in self._reward_types}
         self._buffers_bad = [] # indicator of bad architectures
@@ -86,7 +120,13 @@ class Buffer_Reward_Generator(object):
         self._loader_val = torch.utils.data.DataLoader(dataset_val, batch_size=self._xargs.batch_size, num_workers=0, pin_memory=True, drop_last=True, shuffle=True)
         self._class_num = class_num
         self._region_model = Linear_Region_Collector(input_size=(1000, 1, 3, 3), sample_batch=3, dataset=xargs.dataset, data_path=xargs.data_path, seed=xargs.rand_seed)
-        if space_name == 'nas-bench-201':
+        # self._region_model = Linear_Region_Collector(input_size=(64, 3, 32, 32), sample_batch=3, dataset=xargs.dataset, data_path=xargs.data_path, seed=xargs.rand_seed)
+        if space_name == 'nas-bench-101':
+            self._model_config = edict({'num_labels': class_num, 'in_channels': 3, 'stem_out_channels': 6,
+                                        'num_stacks': 1, 'num_modules_per_stack': 1, 'use_stem': True})
+            self._model_config_thin = edict({'num_labels': class_num, 'in_channels': 3, 'stem_out_channels': 6,
+                                        'num_stacks': 1, 'num_modules_per_stack': 1, 'use_stem': False})
+        elif space_name == 'nas-bench-201':
             self._model_config = edict({'name': 'DARTS-V1', 'C': 3, 'N': 1, 'depth': -1, 'use_stem': True,
                                         'max_nodes': xargs.max_nodes, 'num_classes': class_num, 'space' : space_ops,
                                         'affine' : True, 'track_running_stats': True,
@@ -114,12 +154,17 @@ class Buffer_Reward_Generator(object):
         self._networks = []
         self._networks_thin = []
         for _ in range(self._xargs.repeat):
-            network = get_cell_based_tiny_net(self._model_config).cuda().train()
-            init_model(network, xargs.init)
-            self._networks.append(network)
-            network_thin = get_cell_based_tiny_net(self._model_config_thin).cuda().train()
-            init_model(network_thin, xargs.init)
-            self._networks_thin.append(network_thin)
+            if space_name == 'nas-bench-101':
+                pass
+                # spec = ModelSpec(matrix, operations)
+                # network_thin = Network(spec, **self._model_config_thin)
+            else:
+                network = get_cell_based_tiny_net(self._model_config).cuda().train()  # write get network for 101
+                init_model(network, xargs.init)
+                self._networks.append(network)
+                network_thin = get_cell_based_tiny_net(self._model_config_thin).cuda().train()
+                init_model(network_thin, xargs.init)
+                self._networks_thin.append(network_thin)
         # prepare data samples
         self._ntk_input_data = []
         for i, (inputs, targets) in enumerate(self._loader):
@@ -176,7 +221,7 @@ class Buffer_Reward_Generator(object):
     def get_ntk_region_mse(self, xargs, arch_parameters, loader, region_model):
         # arch_parameters now has three dim: cell_type, edge, op
         for _r in range(self._xargs.repeat):
-            self._networks[_r].set_alphas(arch_parameters)
+            self._networks[_r].set_alphas(arch_parameters) # only create forward nn.module nasbench101
             self._networks_thin[_r].set_alphas(arch_parameters)
 
         ntks = [0]; mses = [0]; LRs = [0]
@@ -192,6 +237,38 @@ class Buffer_Reward_Generator(object):
                 LRs = region_model.forward_batch_sample()
                 region_model.clear()
         torch.cuda.empty_cache()
+        return {
+                "ntk": np.mean(ntks), "region": np.mean(LRs), "mse": np.mean(mses),
+                "bad": np.mean(ntks)==-1 or np.mean(mses)==-1 # networks of bad gradients
+               }
+
+    def get_ntk_region_mse_101(self, xargs, arch, loader, region_model):
+        self._networks = []
+        self._networks_thin = []
+        # arch_parameters now has three dim: cell_type, edge, op
+        matrix, operations = arch
+        operations = [index2ops_101[ops] for ops in operations]
+        spec = ModelSpec(matrix, operations)
+        network = Network(spec, **self._model_config).cuda()
+        network_thin = Network(spec, **self._model_config_thin).cuda()
+        for _r in range(self._xargs.repeat):
+            self._networks.append(network)
+            self._networks_thin.append(network_thin)
+
+        ntks = [0]; mses = [0]; LRs = [0]
+        if  'ntk' in self._reward_types and 'mse' in self._reward_types:
+            ntks, mses = get_ntk_n(self._ntk_input_data, self._networks, loader_val=self._ntk_target_data, train_mode=True, num_batch=1, num_classes=self._class_num)
+        elif 'ntk' in self._reward_types:
+        # if 'ntk' in self._reward_types:
+            ntks = get_ntk_n(self._ntk_input_data, self._networks, train_mode=True, num_batch=1, num_classes=self._class_num)
+        elif 'mse' in self._reward_types:
+            _, mses = get_ntk_n(self._ntk_input_data, self._networks, loader_val=self._ntk_target_data, train_mode=True, num_batch=1, num_classes=self._class_num)
+        if 'region' in self._reward_types:
+            with torch.no_grad():
+                region_model.reinit(models=self._networks_thin, seed=xargs.rand_seed)
+                LRs = region_model.forward_batch_sample()
+                region_model.clear()
+        # torch.cuda.empty_cache()
         return {
                 "ntk": np.mean(ntks), "region": np.mean(LRs), "mse": np.mean(mses),
                 "bad": np.mean(ntks)==-1 or np.mean(mses)==-1 # networks of bad gradients
@@ -232,16 +309,28 @@ class Buffer_Reward_Generator(object):
                 var = (self._buffers[_type][-1] - self._buffers[_type][-2]) / (max(self._buffers[_type][-self._buffer_length:]) - min(self._buffers[_type][-self._buffer_length:]) + 1e-6)
                 self._buffers_change[_type].append(var)
 
-    def step(self, arch, mask=True, verbose=False):
-        if mask:
-            if self._space_name == 'nas-bench-201' and isinstance(arch, str):
-                arch_parameters = self.arch_str2mask_201(arch)
-            else:
-                arch_parameters = self.arch_parameters2mask(arch)
+    def step(self, arch, mask=True, verbose=False, space_name='nas-bench-201'):
+        if space_name == 'nas-bench-101':
+            # self._region_model = Linear_Region_Collector(input_size=(1000, 1, 3, 3), sample_batch=3,
+            #                                              dataset=self._xargs.dataset, data_path=self._xargs.data_path,
+            #                                              seed=self._xargs.rand_seed)
+            results = self.get_ntk_region_mse_101(self._xargs, arch, self._loader, self._region_model)
+            # results.update({"mse": 0})
+            # results = {
+            #     "ntk": np.ones(1), "region": np.ones(1), "mse": np.ones(1),
+            #     "bad": np.ones(1)
+            #    }
+            # torch.cuda.empty_cache()
         else:
-            # e.g. for supernet pruning, not single-path
-            arch_parameters = arch
-        results = self.get_ntk_region_mse(self._xargs, arch_parameters, self._loader, self._region_model)
+            if mask:
+                if self._space_name == 'nas-bench-201' and isinstance(arch, str):
+                    arch_parameters = self.arch_str2mask_201(arch)
+                else:
+                    arch_parameters = self.arch_parameters2mask(arch)
+            else:
+                # e.g. for supernet pruning, not single-path
+                arch_parameters = arch
+            results = self.get_ntk_region_mse(self._xargs, arch_parameters, self._loader, self._region_model)
         self._buffer_insert(results)
         if verbose:
             print("NTK buffer:", self._buffers['ntk'][-self._buffer_length:])
@@ -252,6 +341,7 @@ class Buffer_Reward_Generator(object):
             print("MSE change buffer:", self._buffers_change['mse'][-self._buffer_length:])
         reward = self.get_reward()
         # reward larger the better
+        # torch.cuda.empty_cache()
         return reward
 
     def _buffer_rank_best(self):

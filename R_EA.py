@@ -18,6 +18,7 @@ from models       import CellStructure, get_search_spaces
 
 INF = 1000
 Genotype = namedtuple('Genotype', 'normal normal_concat reduce reduce_concat')
+NAS_BENCH_101         = ['none', 'skip_connect', 'nor_conv_1x1', 'nor_conv_3x3', 'avg_pool_3x3']
 NAS_BENCH_201         = ['none', 'skip_connect', 'nor_conv_1x1', 'nor_conv_3x3', 'avg_pool_3x3']
 DARTS_SPACE           = ['none', 'skip_connect', 'sep_conv_3x3', 'sep_conv_5x5', 'dil_conv_3x3', 'dil_conv_5x5', 'avg_pool_3x3', 'max_pool_3x3']
 
@@ -47,6 +48,22 @@ def random_architecture_func_201(max_nodes, op_names):
         return CellStructure( genotypes )
     return random_architecture
 
+def random_architecture_func_101(max_nodes, all_archs):
+    # return a random architecture
+    def random_architecture():
+        # return np.random.choice(list(nas_bench.keys()), size=1, replace=False)
+        return random.sample(all_archs, 1)[0]
+        # genotypes = []
+        # for i in range(1, max_nodes):
+        #     xlist = []
+        #     for j in range(i):
+        #         node_str = '{:}<-{:}'.format(i, j)
+        #         op_name  = random.choice( op_names )
+        #         xlist.append((op_name, j))
+        #     genotypes.append( tuple(xlist) )
+        # return CellStructure( genotypes )
+    return random_architecture
+
 
 def random_architecture_func_darts(op_names):
     # return a random architecture
@@ -55,6 +72,30 @@ def random_architecture_func_darts(op_names):
         return genotype_darts(weights, op_names)
     return random_architecture
 
+
+def mutate_arch_func_101(all_archs):
+    """Computes the architecture for a child of the given parent architecture.
+    The parent architecture is cloned and mutated to produce the child architecture. The child architecture is mutated by randomly switch one operation to another.
+    """
+    def mutate_arch_func(parent_arch):
+        result = parent_arch
+        while result not in all_archs:
+            adj, ops = deepcopy(parent_arch)
+            adj = [list(a) for a in adj]
+            ops = list(ops)
+            adj_idx = random.randint(0, len(adj) - 1)
+            adj_idx_idx = random.randint(0, len(adj[adj_idx]) - 1)
+            adj[adj_idx][adj_idx_idx] = 1 - adj[adj_idx][adj_idx_idx]
+            ops_idx = random.randint(0, len(ops) - 1)
+            ops_list = [0, 1, 2, 3, 4]
+            ops_list.remove(ops[ops_idx])
+            ops[ops_idx] = random.choice(ops_list)
+            adj = tuple([tuple(a) for a in adj])
+            ops = tuple(ops)
+            result = deepcopy((adj, ops))
+        return result
+
+    return mutate_arch_func
 
 def mutate_arch_func_201(op_names):
     """Computes the architecture for a child of the given parent architecture.
@@ -153,7 +194,25 @@ def genotype2mask_201(genotype, op_names=NAS_BENCH_201):
     return masks
 
 
-def arch_distance_201(arch1, arch2, op_names=NAS_BENCH_201):
+def arch_distance_101(arch1, arch2, op_names=NAS_BENCH_101): #visualization of population convergence
+    # arch is CellStructure
+    # ops1 = []
+    # for node in arch1:
+    #     for edge in node:
+    #         ops1.append(op_names.index(edge[0]))
+    # ops2 = []
+    # for node in arch2:
+    #     for edge in node:
+    #         ops2.append(op_names.index(edge[0]))
+    adj1, ops1 = arch1
+    adj2, ops2 = arch2
+    distance = 0
+    distance += sum([1 if a1!=a2 else 0 for aj1, aj2 in zip(adj1, adj2) for (a1, a2) in zip(aj1, aj2)])
+    distance += sum([1 if op1!=op2 else 0 for op1, op2 in zip(ops1, ops2)])
+    return distance
+
+
+def arch_distance_201(arch1, arch2, op_names=NAS_BENCH_201): #visualization of population convergence
     # arch is CellStructure
     ops1 = []
     for node in arch1.nodes:
@@ -203,7 +262,29 @@ def arch_distance_darts(genotype1, genotype2, op_names=DARTS_SPACE):
 def proxy_inference(xargs, arch, nas_bench, logger, step_current, dataname, te_reward_generator=None):
     accuracy = -1 # GT accuracy of arch
     reward_type = 'accuracy'
-    if xargs.search_space_name == 'nas-bench-201':
+    if xargs.search_space_name == 'nas-bench-101':
+        # arch_idx = nas_bench.query_index_by_arch(arch)
+        # archinfo = nas_bench.query_meta_info_by_index(arch_idx)
+        # accuracy = archinfo.get_metrics(dataname, 'x-valid')['accuracy']
+        accuracy = nas_bench[arch]['scratch']['valid']['acc'][108]['avg']*100
+        if step_current >= 0: logger.writer.add_scalar("accuracy/search", accuracy, step_current)
+        start_time = time.time()
+        # _ = te_reward_generator.step(nas_bench.query_by_index(arch_idx).arch_str)
+        _ = te_reward_generator.step(arch, space_name=xargs.search_space_name)
+        if len(te_reward_generator._buffers['ntk']) == 0:
+            reward = {'ntk': math.inf, 'region': 0, 'mse': math.inf}
+        else:
+            # reward = {'ntk': -te_reward_generator._buffers['ntk'][-1],
+            #           'region': te_reward_generator._buffers['region'][-1],
+            #           'mse': -te_reward_generator._buffers['mse'][-1]}
+            reward = {'ntk': -te_reward_generator._buffers['ntk'][-1],
+                      'mse': -te_reward_generator._buffers['mse'][-1]}
+        time_spent = time.time() - start_time
+        if step_current >= 0:
+            logger.writer.add_scalar("TE/NTK", te_reward_generator._buffers['ntk'][-1], step_current)
+            # logger.writer.add_scalar("TE/Linear_Regions", te_reward_generator._buffers['region'][-1], step_current)
+            logger.writer.add_scalar("TE/MSE", te_reward_generator._buffers['mse'][-1], step_current)
+    elif xargs.search_space_name == 'nas-bench-201':
         arch_idx = nas_bench.query_index_by_arch(arch)
         archinfo = nas_bench.query_meta_info_by_index(arch_idx)
         accuracy = archinfo.get_metrics(dataname, 'x-valid')['accuracy']
@@ -221,7 +302,7 @@ def proxy_inference(xargs, arch, nas_bench, logger, step_current, dataname, te_r
             logger.writer.add_scalar("TE/MSE", te_reward_generator._buffers['mse'][-1], step_current)
     elif xargs.search_space_name == 'darts':
         start_time = time.time()
-        _ = te_reward_generator.step(genotype2mask_darts(arch))
+        _ = te_reward_generator.step(genotype2mask_darts(arch)) #masked
         if len(te_reward_generator._buffers['ntk']) == 0:
             reward = {'ntk': math.inf, 'region': 0, 'mse': math.inf}
         else:
@@ -292,7 +373,9 @@ def population_diversity(population, space_name):
         for p2 in range(p1+1, len(population)):
             model1 = population[p1]
             model2 = population[p2]
-            if space_name == 'nas-bench-201':
+            if space_name == 'nas-bench-101':
+                distances += arch_distance_101(model1.arch, model2.arch)
+            elif space_name == 'nas-bench-201':
                 distances += arch_distance_201(model1.arch, model2.arch)
             elif space_name == 'darts':
                 distances += arch_distance_darts(model1.arch, model2.arch)
@@ -346,7 +429,11 @@ def regularized_evolution(xargs, total_steps, step_current, sample_size, random_
 
         best_arch, best_type = best_of_sample(population, topk=2, sort=True)  # choose parent based on changing range out of samples
         logger.log('step [{:3d}] : best of populuation {:} type={:} : {:}'.format(_step, best_arch.accuracy[best_type], best_type, best_arch.arch))
-        if xargs.search_space_name == 'nas-bench-201':
+        if xargs.search_space_name == 'nas-bench-101':
+            accuracy = nas_bench[best_arch.arch]['scratch']['valid']['acc'][108]['avg']*100
+            logger.log('step [{:3d}] => accuracy of population {}'.format(_step, accuracy))
+            logger.writer.add_scalar("accuracy/derive", accuracy, step_current)
+        elif xargs.search_space_name == 'nas-bench-201':
             logger.log('step [{:3d}] => accuracy of population {}'.format(_step, nas_bench.query_meta_info_by_index(nas_bench.query_index_by_arch(best_arch.arch)).get_metrics(dataname, 'x-valid')['accuracy']))
             logger.writer.add_scalar("accuracy/derive", nas_bench.query_meta_info_by_index(nas_bench.query_index_by_arch(best_arch.arch)).get_metrics(dataname, 'x-valid')['accuracy'], step_current)
     return population, history, step_current, time_cost_training
@@ -355,7 +442,8 @@ def regularized_evolution(xargs, total_steps, step_current, sample_size, random_
 def main(xargs, nas_bench):
     PID = os.getpid()
     if xargs.timestamp == 'none':
-        xargs.timestamp = "{:}".format(time.strftime('%h-%d-%C_%H-%M-%s', time.gmtime(time.time())))
+        # xargs.timestamp = "{:}".format(time.strftime('%h-%d-%C_%H-%M-%s', time.gmtime(time.time())))
+        xargs.timestamp = "{:}".format(time.strftime('%m-%d-%Y-%H:%M%p', time.gmtime(time.time())))
 
     assert torch.cuda.is_available(), 'CUDA is not available.'
     torch.backends.cudnn.enabled   = True
@@ -379,16 +467,21 @@ def main(xargs, nas_bench):
     train_data, valid_data, xshape, class_num = get_datasets(xargs.dataset, xargs.data_path, -1)
     logger.log('||||||| {:10s} ||||||| Train-Loader-Num={:}, Valid-Loader-Num={:}'.format(xargs.dataset, len(train_data), len(valid_data)))
     logger.log('||||||| {:10s} |||||||'.format(xargs.dataset))
-
-    search_space = get_search_spaces('cell', xargs.search_space_name)
-    if xargs.search_space_name == 'nas-bench-201':
+    if xargs.search_space_name != 'nas-bench-101':
+        search_space = get_search_spaces('cell', xargs.search_space_name)
+    if xargs.search_space_name == 'nas-bench-101':
+        all_archs = list(nas_bench.keys())
+        search_space = get_search_spaces('cell', 'nas-bench-201')
+        random_arch = random_architecture_func_101(xargs.max_nodes, all_archs)
+        mutate_arch = mutate_arch_func_101(all_archs)
+    elif xargs.search_space_name == 'nas-bench-201':
         random_arch = random_architecture_func_201(xargs.max_nodes, search_space)
         mutate_arch = mutate_arch_func_201(search_space)
     elif xargs.search_space_name == 'darts':
         random_arch = random_architecture_func_darts(search_space)
         mutate_arch = mutate_arch_func_darts(search_space)
     x_start_time = time.time()
-    logger.log('{:} use nas_bench : {:}'.format(time_string(), nas_bench))
+    # logger.log('{:} use nas_bench : {:}'.format(time_string(), nas_bench))
     logger.log('-'*30 + ' start searching')
 
     start_time = time.time()
@@ -450,9 +543,12 @@ if __name__ == '__main__':
     parser.add_argument('--super_type',       type=str, default='basic',  help='type of supernet: basic or nasnet-super')
     args = parser.parse_args()
     if args.rand_seed is None or args.rand_seed < 0: args.rand_seed = random.randint(1, 100000)
-    if args.arch_nas_dataset is None or not os.path.isfile(args.arch_nas_dataset) or args.search_space_name != 'nas-bench-201':
+    if args.arch_nas_dataset is None or not os.path.isfile(args.arch_nas_dataset) or (args.search_space_name != 'nas-bench-201' and args.search_space_name != 'nas-bench-101'):
         nas_bench = None
     else:
         print ('{:} build NAS-Benchmark-API from {:}'.format(time_string(), args.arch_nas_dataset))
-        nas_bench = API(args.arch_nas_dataset)
+        if args.search_space_name == 'nas-bench-101':
+            nas_bench = torch.load(args.arch_nas_dataset)
+        else:
+            nas_bench = API(args.arch_nas_dataset)
     main(args, nas_bench)

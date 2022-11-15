@@ -3,12 +3,20 @@ import time
 import argparse
 
 # TODO please configure TORCH_HOME and data_paths before running
-TORCH_HOME = "/ssd1/chenwy"  # Path that contains the nas-bench-201 database. If you only want to run on NASNET (i.e. DARTS) search space, then just leave it empty
+# TORCH_HOME = "/ssd1/chenwy"  # Path that contains the nas-bench-201 database. If you only want to run on NASNET (i.e. DARTS) search space, then just leave it empty
+# data_paths = {
+#     "cifar10": "/ssd1/cifar.python",
+#     "cifar100": "/ssd1/cifar.python",
+#     "ImageNet16-120": "/ssd1/ImageNet16",
+#     "imagenet-1k": "/ssd1/chenwy/imagenet_final",
+# }
+
+TORCH_HOME = "D:/DATASET/tegnas"  # Path that contains the nas-bench-201 database. If you only want to run on NASNET (i.e. DARTS) search space, then just leave it empty
 data_paths = {
-    "cifar10": "/ssd1/cifar.python",
-    "cifar100": "/ssd1/cifar.python",
-    "ImageNet16-120": "/ssd1/ImageNet16",
-    "imagenet-1k": "/ssd1/chenwy/imagenet_final",
+    "cifar10": "D:/DATASET/tegnas/cifar.python",
+    "cifar100": "D:/DATASET/tegnas/cifar.python",
+    "ImageNet16-120": "D:/DATASET/tegnas/cifar.python/ImageNet16",
+    "imagenet-1k": "D:/DATASET/tegnas/imagenet_final",
 }
 
 total_steps = 1000
@@ -31,7 +39,8 @@ elif args.space == "darts":
     args.learning_rate = 0.07
 
 
-timestamp = "{:}".format(time.strftime('%h-%d-%C_%H-%M-%s', time.gmtime(time.time())))
+# timestamp = "{:}".format(time.strftime('%h-%d-%C_%H-%M-%s', time.gmtime(time.time())))
+timestamp = "{:}".format(time.strftime('%m-%d-%Y-%H:%M%p', time.gmtime(time.time())))
 
 
 core_cmd = "CUDA_VISIBLE_DEVICES={gpuid} OMP_NUM_THREADS=4 python ./R_EA.py \
@@ -62,4 +71,5 @@ core_cmd = "CUDA_VISIBLE_DEVICES={gpuid} OMP_NUM_THREADS=4 python ./R_EA.py \
     timestamp=timestamp,
 )
 
-os.system(core_cmd)
+print(core_cmd)
+# os.system(core_cmd)

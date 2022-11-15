@@ -198,6 +198,7 @@ class Linear_Region_Collector:
                 del model
             self.models = models
             for model in self.models:
+                # model = model.cpu()
                 self.register_hook(model)
             self.LRCounts = [LinearRegionCount(self.input_size[0]*self.sample_batch) for _ in range(len(models))]
         if input_size is not None or sample_batch is not None:
@@ -240,6 +241,7 @@ class Linear_Region_Collector:
     def hook_in_forward(self, module, input, output):
         if isinstance(input, tuple) and len(input[0].size()) == 4:
             self.interFeature.append(output.detach())  # for ReLU
+            # self.interFeature.append(torch.ones(output.shape))  # for ReLU
 
     def _initialize_weights(self):
         for model in self.models:
@@ -269,6 +271,7 @@ class Linear_Region_Collector:
         self.interFeature = []
         with torch.no_grad():
             model.forward(input_data.cuda(device=self.device, non_blocking=True))
+            # model.forward(input_data)
             if len(self.interFeature) == 0: return
             feature_data = torch.cat([f.view(input_data.size(0), -1) for f in self.interFeature], 1)
             LRCount.update2D(feature_data)

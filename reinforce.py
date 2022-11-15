@@ -53,9 +53,10 @@ class Policy_DARTS(nn.Module):
         arch_parameters = [-INF*torch.ones_like(alpha) for alpha in self.arch_parameters]
         for cell_idx, action in enumerate(actions):
             for edge_idx, edge in enumerate(action):
-                if edge > -1:
+                if edge > -1: # edge 0, 1,
+                    # arch params is of shape 14*7
                     arch_parameters[cell_idx][edge_idx, edge] = 0
-        return arch_parameters
+        return arch_parameters # [2][14, 7]
 
     def genotype(self, weights=None):
         if weights is None:
@@ -152,7 +153,7 @@ class ExponentialMovingAverage(object):
 
 def select_action(policy):
     probs = policy()
-    if len(probs) == 2:
+    if len(probs) == 2: # Hardcoded for DARTs
         m = [Categorical(prob) for prob in probs]
         # DARTS, -1 for not using an edge, mute some edges by index_of_action of prob
         actions = [_m.sample() for _m in m]
