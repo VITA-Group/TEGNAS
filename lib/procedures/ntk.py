@@ -57,12 +57,15 @@ def get_ntk_n(loader, networks, loader_val=None, train_mode=False, num_batch=-1,
     ntks = [torch.einsum('nc,mc->nm', [_grads, _grads]) for _grads in grads_x]
     conds_x = []
     for ntk in ntks:
-        eigenvalues, _ = torch.symeig(ntk)  # ascending
-        _cond = eigenvalues[-1] / eigenvalues[0]
-        if torch.isnan(_cond):
+        try:
+            eigenvalues, _ = torch.symeig(ntk)  # ascending
+            _cond = eigenvalues[-1] / eigenvalues[0]
+            if torch.isnan(_cond):
+                conds_x.append(-1) # bad gradients
+            else:
+                conds_x.append(_cond.item())
+        except RuntimeError:
             conds_x.append(-1) # bad gradients
-        else:
-            conds_x.append(_cond.item())
     # Val / Test set
     if loader_val is not None:
         for i, (inputs, targets) in enumerate(loader_val):
