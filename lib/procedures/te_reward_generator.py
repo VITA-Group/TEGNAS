@@ -119,13 +119,27 @@ class Buffer_Reward_Generator(object):
         self._loader = torch.utils.data.DataLoader(dataset, batch_size=self._xargs.batch_size, num_workers=0, pin_memory=True, drop_last=True, shuffle=True)
         self._loader_val = torch.utils.data.DataLoader(dataset_val, batch_size=self._xargs.batch_size, num_workers=0, pin_memory=True, drop_last=True, shuffle=True)
         self._class_num = class_num
-        self._region_model = Linear_Region_Collector(input_size=(1000, 1, 3, 3), sample_batch=3, dataset=xargs.dataset, data_path=xargs.data_path, seed=xargs.rand_seed)
-        # self._region_model = Linear_Region_Collector(input_size=(64, 3, 32, 32), sample_batch=3, dataset=xargs.dataset, data_path=xargs.data_path, seed=xargs.rand_seed)
+        if space_name == 'nas-bench-101':
+            # self._region_model = Linear_Region_Collector(input_size=(64, 3, 32, 32), sample_batch=3,
+            #                                              dataset=xargs.dataset, data_path=xargs.data_path,
+            #                                              seed=xargs.rand_seed)
+            self._region_model = Linear_Region_Collector(input_size=(1000, 1, 3, 3), sample_batch=3,
+                                                         dataset=xargs.dataset, data_path=xargs.data_path,
+                                                         seed=xargs.rand_seed)
+        elif space_name == 'nas-bench-201':
+            self._region_model = Linear_Region_Collector(input_size=(1000, 1, 3, 3), sample_batch=3,
+                                                         dataset=xargs.dataset, data_path=xargs.data_path,
+                                                         seed=xargs.rand_seed)
+        else:
+            self._region_model = Linear_Region_Collector(input_size=(1000, 1, 3, 3), sample_batch=3,
+                                                         dataset=xargs.dataset, data_path=xargs.data_path,
+                                                         seed=xargs.rand_seed)
+
         if space_name == 'nas-bench-101':
             self._model_config = edict({'num_labels': class_num, 'in_channels': 3, 'stem_out_channels': 6,
                                         'num_stacks': 1, 'num_modules_per_stack': 1, 'use_stem': True})
-            self._model_config_thin = edict({'num_labels': class_num, 'in_channels': 3, 'stem_out_channels': 6,
-                                        'num_stacks': 1, 'num_modules_per_stack': 1, 'use_stem': False})
+            self._model_config_thin = edict({'num_labels': class_num, 'in_channels': 1, 'stem_out_channels': 6,
+                                        'num_stacks': 1, 'num_modules_per_stack': 1, 'use_stem': True})
         elif space_name == 'nas-bench-201':
             self._model_config = edict({'name': 'DARTS-V1', 'C': 3, 'N': 1, 'depth': -1, 'use_stem': True,
                                         'max_nodes': xargs.max_nodes, 'num_classes': class_num, 'space' : space_ops,
@@ -268,7 +282,7 @@ class Buffer_Reward_Generator(object):
                 region_model.reinit(models=self._networks_thin, seed=xargs.rand_seed)
                 LRs = region_model.forward_batch_sample()
                 region_model.clear()
-        # torch.cuda.empty_cache()
+        torch.cuda.empty_cache()
         return {
                 "ntk": np.mean(ntks), "region": np.mean(LRs), "mse": np.mean(mses),
                 "bad": np.mean(ntks)==-1 or np.mean(mses)==-1 # networks of bad gradients

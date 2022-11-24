@@ -36,7 +36,8 @@ def get_ntk_n(loader, networks, loader_val=None, train_mode=False, num_batch=-1,
                 for name, W in network.named_parameters():
                     if 'weight' in name and W.grad is not None:
                         grad.append(W.grad.view(-1).detach())
-                        if "cell" in name:
+                        # if "cell" in name:
+                        if "layers" in name:
                             cellgrad.append(W.grad.view(-1).detach())
                 grads_x[net_idx].append(torch.cat(grad, -1))
                 cellgrad = torch.cat(cellgrad, -1) if len(cellgrad) > 0 else torch.Tensor([0]).cuda()
@@ -100,13 +101,23 @@ def get_ntk_n(loader, networks, loader_val=None, train_mode=False, num_batch=-1,
             cellgrads_y[_i] = grads
         for net_idx in range(len(networks)):
             # _ntk_yx = torch.einsum('nc,mc->nm', [cellgrads_y[net_idx], cellgrads_x[net_idx]])
-            # PY = torch.einsum('jk,kl,lm->jm', _ntk_yx, torch.inverse(ntk_cell_x[net_idx]), targets_x_onehot_mean)
+            # _ntk_yx_i = ntk_cell_x[net_idx].cpu()
+            # _ntk_yx_inv = torch.inverse(_ntk_yx_i) #RuntimeError: cusolver error: CUSOLVER_STATUS_EXECUTION_FAILED, when calling `cusolverDnSgetrf( handle, m, n, dA, ldda, static_cast<float*>(dataPtr.get()), ipiv, info)`
+            # PY = torch.einsum('jk,kl,lm->jm', _ntk_yx, _ntk_yx_inv, targets_x_onehot_mean)
+            # # PY = torch.einsum('jk,kl,lm->jm', _ntk_yx, ntk_cell_x[net_idx], targets_x_onehot_mean)
+            # # PY = torch.einsum('jk,kl,lm->jm', _ntk_yx.cpu(), torch.inverse(ntk_cell_x[net_idx]).cpu(), targets_x_onehot_mean.cpu()).cuda()
+            # # PY = torch.einsum('jk,kl,lm->jm', _ntk_yx, torch.inverse(ntk_cell_x[net_idx]), targets_x_onehot_mean)
             # prediction_mses.append(((PY - targets_y_onehot_mean) ** 2).sum(1).mean(0).item())
             try:
                 _ntk_yx = torch.einsum('nc,mc->nm', [cellgrads_y[net_idx], cellgrads_x[net_idx]])
-                PY = torch.einsum('jk,kl,lm->jm', _ntk_yx, torch.inverse(ntk_cell_x[net_idx]), targets_x_onehot_mean)
+                _ntk_yx_i = ntk_cell_x[net_idx].cpu()
+                _ntk_yx_inv = torch.inverse(_ntk_yx_i).cuda()
+                PY = torch.einsum('jk,kl,lm->jm', _ntk_yx, _ntk_yx_inv, targets_x_onehot_mean)
+                # _ntk_yx = torch.einsum('nc,mc->nm', [cellgrads_y[net_idx], cellgrads_x[net_idx]])
+                # PY = torch.einsum('jk,kl,lm->jm', _ntk_yx, torch.inverse(ntk_cell_x[net_idx]), targets_x_onehot_mean)
                 prediction_mses.append(((PY - targets_y_onehot_mean)**2).sum(1).mean(0).item())
-            except RuntimeError:
+            except RuntimeError as err:
+                print(f'RuntimeError: {err}')
                 # RuntimeError: inverse_gpu: U(1,1) is zero, singular U.
                 # prediction_mses.append(((targets_y_onehot_mean)**2).sum(1).mean(0).item())
                 prediction_mses.append(-1) # bad gradients

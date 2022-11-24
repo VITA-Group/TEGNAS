@@ -274,15 +274,13 @@ def proxy_inference(xargs, arch, nas_bench, logger, step_current, dataname, te_r
         if len(te_reward_generator._buffers['ntk']) == 0:
             reward = {'ntk': math.inf, 'region': 0, 'mse': math.inf}
         else:
-            # reward = {'ntk': -te_reward_generator._buffers['ntk'][-1],
-            #           'region': te_reward_generator._buffers['region'][-1],
-            #           'mse': -te_reward_generator._buffers['mse'][-1]}
             reward = {'ntk': -te_reward_generator._buffers['ntk'][-1],
+                      'region': te_reward_generator._buffers['region'][-1],
                       'mse': -te_reward_generator._buffers['mse'][-1]}
         time_spent = time.time() - start_time
         if step_current >= 0:
             logger.writer.add_scalar("TE/NTK", te_reward_generator._buffers['ntk'][-1], step_current)
-            # logger.writer.add_scalar("TE/Linear_Regions", te_reward_generator._buffers['region'][-1], step_current)
+            logger.writer.add_scalar("TE/Linear_Regions", te_reward_generator._buffers['region'][-1], step_current)
             logger.writer.add_scalar("TE/MSE", te_reward_generator._buffers['mse'][-1], step_current)
     elif xargs.search_space_name == 'nas-bench-201':
         arch_idx = nas_bench.query_index_by_arch(arch)
@@ -383,8 +381,7 @@ def population_diversity(population, space_name):
 
 
 def regularized_evolution(xargs, total_steps, step_current, sample_size, random_arch, mutate_arch, logger, PID,
-                          history, population, nas_bench, dataname, te_reward_generator=None
-                         ):
+                          history, population, nas_bench, dataname, arch_enum, te_reward_generator=None):
     """Algorithm for regularized evolution (i.e. aging evolution).
 
     Follows "Algorithm 1" in Real et al. "Regularized Evolution for Image
@@ -403,6 +400,7 @@ def regularized_evolution(xargs, total_steps, step_current, sample_size, random_
 
     # Carry out evolution in cycles. Each cycle produces a model and removes another.
     time_cost_training = 0
+
     for _step in range(total_steps):
         best_arch, _ = best_of_sample(population, topk=2, sort=True)  # choose parent based on changing range out of samples
 
@@ -410,7 +408,6 @@ def regularized_evolution(xargs, total_steps, step_current, sample_size, random_
 
         # Sample randomly chosen models from the current population.
         sample = np.random.choice(list(population), size=sample_size, replace=False)
-
         # The parent is the best model in the sample.
         parent, reward_type = best_of_sample(sample, topk=2, sort=True)  # choose parent based on changing range out of samples
 
@@ -418,6 +415,7 @@ def regularized_evolution(xargs, total_steps, step_current, sample_size, random_
         child = Model()
         child.arch = mutate_arch(parent.arch)
         child.accuracy, accuracy_gt, time_cost = proxy_inference(xargs, child.arch, nas_bench, logger, step_current, dataname, te_reward_generator)
+        arch_enum.add(child.arch)
         time_cost_training += time_cost
         population.append(child)
         history.append(child)
@@ -431,8 +429,11 @@ def regularized_evolution(xargs, total_steps, step_current, sample_size, random_
         logger.log('step [{:3d}] : best of populuation {:} type={:} : {:}'.format(_step, best_arch.accuracy[best_type], best_type, best_arch.arch))
         if xargs.search_space_name == 'nas-bench-101':
             accuracy = nas_bench[best_arch.arch]['scratch']['valid']['acc'][108]['avg']*100
-            logger.log('step [{:3d}] => accuracy of population {}'.format(_step, accuracy))
-            logger.writer.add_scalar("accuracy/derive", accuracy, step_current)
+            accuracy_test = nas_bench[best_arch.arch]['scratch']['test']['acc'][108]['avg']*100
+            logger.log('samples: {}, step [{:3d}] => valid accuracy of population {}'.format(len(arch_enum), _step, accuracy))
+            logger.log('samples: {}, step [{:3d}] => test accuracy of population {}'.format(len(arch_enum), _step, accuracy_test))
+            logger.writer.add_scalar("accuracy/valid/derive", accuracy, step_current)
+            logger.writer.add_scalar("accuracy/test/derive", accuracy_test, step_current)
         elif xargs.search_space_name == 'nas-bench-201':
             logger.log('step [{:3d}] => accuracy of population {}'.format(_step, nas_bench.query_meta_info_by_index(nas_bench.query_index_by_arch(best_arch.arch)).get_metrics(dataname, 'x-valid')['accuracy']))
             logger.writer.add_scalar("accuracy/derive", nas_bench.query_meta_info_by_index(nas_bench.query_index_by_arch(best_arch.arch)).get_metrics(dataname, 'x-valid')['accuracy'], step_current)
@@ -494,6 +495,7 @@ def main(xargs, nas_bench):
     population = collections.deque()
     history = []  # Not used, history of all samples
     # Initialize the population with random models.
+    arch_enum = set()
     while len(population) < xargs.ea_population_size:
         print("<< ============== JOB (PID = %d) %s [Init population %d/%d] ============== >>"%(PID, '/'.join(xargs.save_dir.split("/")[-5:]), len(population), xargs.ea_population_size))
         model = Model()
@@ -502,11 +504,11 @@ def main(xargs, nas_bench):
         time_cost_training += _time_cost_training
         population.append(model)
         history.append(model)
+        arch_enum.add(model.arch)
     #################################
 
     population, history, step_current, _time_cost_training = regularized_evolution(xargs, xargs.total_steps, step_current, xargs.ea_sample_size, random_arch, mutate_arch, logger, PID,
-                                                                                   history, population, nas_bench, dataname, te_reward_generator
-                                                                                  )
+                                                                                   history, population, nas_bench, dataname, arch_enum, te_reward_generator)
     time_cost_training += _time_cost_training
 
     total_time_cost = time.time() - start_time
