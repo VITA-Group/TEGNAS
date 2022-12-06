@@ -2,7 +2,7 @@ import numpy as np
 import torch
 
 
-def get_ntk_n(loader, networks, loader_val=None, train_mode=False, num_batch=-1, num_classes=100, search_space_name=None):
+def get_ntk_n(loader, networks, search_space_name, loader_val=None, train_mode=False, num_batch=-1, num_classes=100):
     device = torch.cuda.current_device()
     ntks = []
     for network in networks:

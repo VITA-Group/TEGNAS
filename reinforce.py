@@ -247,13 +247,16 @@ def main(xargs, nas_bench):
     # logger.log('||||||| {:10s} ||||||| Train-Loader-Num={:}, Valid-Loader-Num={:}'.format(xargs.dataset, len(train_data), len(valid_data)))
     # logger.log('||||||| {:10s} |||||||'.format(xargs.dataset))
 
-    search_space = get_search_spaces('cell', xargs.search_space_name)
+
     if xargs.search_space_name == 'nas-bench-101':
+        # search_space = get_search_spaces('cell', xargs.search_space_name)
         all_archs = list(nas_bench.keys())
         policy    = Policy101(xargs.max_nodes, all_archs).cuda()
     elif xargs.search_space_name == 'nas-bench-201':
+        search_space = get_search_spaces('cell', xargs.search_space_name)
         policy    = Policy(xargs.max_nodes, search_space).cuda()
     elif xargs.search_space_name == 'darts':
+        search_space = get_search_spaces('cell', xargs.search_space_name)
         policy    = Policy_DARTS(xargs.max_nodes, search_space).cuda()
     optimizer = torch.optim.Adam(policy.parameters(), lr=xargs.learning_rate)
     #optimizer = torch.optim.SGD(policy.parameters(), lr=xargs.learning_rate)
@@ -276,7 +279,7 @@ def main(xargs, nas_bench):
     accuracy_test_best = 0
     total_steps = 500
     step_current = 0 # for tensorboard
-    te_reward_generator = Buffer_Reward_Generator(xargs, xargs.search_space_name, search_space, train_data, valid_data, class_num)
+    te_reward_generator = Buffer_Reward_Generator(xargs, xargs.search_space_name, None, train_data, valid_data, class_num)
 
     for _step in range(total_steps):
         print("<< ============== JOB (PID = %d) %s ============== >>"%(PID, '/'.join(xargs.save_dir.split("/")[-5:])))
@@ -306,8 +309,10 @@ def main(xargs, nas_bench):
             logger.writer.add_scalar("TE/MSE", te_reward_generator._buffers['mse'][-1], step_current)
             logger.writer.add_scalar("accuracy/derive", accuracy, step_current)
             logger.writer.add_scalar("accuracy_test/derive", accuracy_test, step_current)
-            probs = policy()
-            logger.writer.add_scalar("reinforce/entropy", -(torch.log(probs) * probs).sum(1).mean(0), step_current)
+            probs_matrix, probs_ops = policy()
+            logger.writer.add_scalar("reinforce/entropy/matrix", -(torch.log(probs_matrix) * probs_matrix).sum(1).mean(0), step_current)
+            logger.writer.add_scalar("reinforce/entropy/ops", -(torch.log(probs_ops) * probs_ops).sum(1).mean(0), step_current)
+
         elif xargs.search_space_name == 'nas-bench-201':
             arch_idx = nas_bench.query_index_by_arch(arch)
             archinfo = nas_bench.query_meta_info_by_index(arch_idx)
