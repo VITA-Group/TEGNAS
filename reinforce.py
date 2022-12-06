@@ -267,7 +267,7 @@ def main(xargs, nas_bench):
     prepare_seed(xargs.rand_seed)
 
     xargs.init = 'kaiming_norm'
-    xargs.save_dir = xargs.save_dir + \
+    xargs.save_dir = './output/nasbench101/REINFORCE' + \
         "/LR%.2f-%s-buffer%d-batch%d-repeat%d"%(xargs.learning_rate, xargs.init, xargs.te_buffer_size, xargs.batch_size, xargs.repeat) + \
         "/{:}/seed{:}".format(xargs.timestamp, xargs.rand_seed)
     logger = prepare_logger(xargs)
