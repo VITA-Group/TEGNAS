@@ -304,14 +304,13 @@ def main(xargs, nas_bench):
     # logger.log('{:} use nas_bench : {:}'.format(time_string(), nas_bench))
     arch_enum = set()
     # REINFORCE
-    x_start_time = time.time()
     trace = []
     accuracy_history = [] # for 201: save gt accuracy
     start_time = time.time()
     time_proxy_total = 0
     accuracy_best = 0
     accuracy_test_best = 0
-    total_steps = 300
+    total_steps = 500
     step_current = 0 # for tensorboard
     te_reward_generator = Buffer_Reward_Generator(xargs, xargs.search_space_name, None, train_data, valid_data, class_num)
 
@@ -339,16 +338,29 @@ def main(xargs, nas_bench):
             if accuracy_test>accuracy_test_best: accuracy_test_best=accuracy_test
             accuracy_history.append(accuracy)
             logger.writer.add_scalar("accuracy/search", accuracy, step_current)
-            _start_time = time.time()
+            time_elapsed = time.time() - start_time
+            num_unique_samples = len(arch_enum)
+
             reward = te_reward_generator.step(arch, space_name=xargs.search_space_name)
             logger.writer.add_scalar("TE/NTK", te_reward_generator._buffers['ntk'][-1], step_current)
             logger.writer.add_scalar("TE/Linear_Regions", te_reward_generator._buffers['region'][-1], step_current)
             logger.writer.add_scalar("TE/MSE", te_reward_generator._buffers['mse'][-1], step_current)
-            logger.writer.add_scalar("accuracy/derive", accuracy, step_current)
-            logger.writer.add_scalar("accuracy_test/derive", accuracy_test, step_current)
+            # logger.writer.add_scalar("accuracy/derive", accuracy, step_current)
+            # logger.writer.add_scalar("accuracy_test/derive", accuracy_test, step_current)
             probs_matrix, probs_ops = policy()
             logger.writer.add_scalar("reinforce/entropy/matrix", -(torch.log(probs_matrix) * probs_matrix).sum(1).mean(0), step_current)
             logger.writer.add_scalar("reinforce/entropy/ops", -(torch.log(probs_ops) * probs_ops).sum(1).mean(0), step_current)
+
+            logger.writer.add_scalar("accuracy/valid/derive", accuracy, step_current)
+            logger.writer.add_scalar("accuracy/test/derive", accuracy_test, step_current)
+            logger.writer.add_scalar("accuracy/valid/derive/unique", accuracy, num_unique_samples)
+            logger.writer.add_scalar("accuracy/test/derive/unique", accuracy_test, num_unique_samples)
+            logger.writer.add_scalar("accuracy/best/valid/derive/unique", accuracy_best, num_unique_samples)
+            logger.writer.add_scalar("accuracy/best/test/derive/unique", accuracy_test_best, num_unique_samples)
+            logger.writer.add_scalar("accuracy/best/valid/derive/wallclock", accuracy_best, time_elapsed)
+            logger.writer.add_scalar("accuracy/best/test/derive/wallclock", accuracy_test_best, time_elapsed)
+            # logger.log('step [{:3d}] : accuracy {}'.format(_step, accuracy))
+            logger.log(f'Wallclock: {time_elapsed:.3f}, Num: {num_unique_samples}, Step: [{_step:3d}], Valid: {accuracy:.4f} (Best: {accuracy_best:.4f}), Test: {accuracy_test:.4f} (Best: {accuracy_test_best:.4f})')
 
         elif xargs.search_space_name == 'nas-bench-201':
             arch_idx = nas_bench.query_index_by_arch(arch)
@@ -356,7 +368,6 @@ def main(xargs, nas_bench):
             accuracy = archinfo.get_metrics(dataname, 'x-valid')['accuracy']
             accuracy_history.append(accuracy)
             logger.writer.add_scalar("accuracy/search", accuracy, step_current)
-            _start_time = time.time()
             reward = te_reward_generator.step(nas_bench.query_by_index(arch_idx).arch_str)
             logger.writer.add_scalar("TE/NTK", te_reward_generator._buffers['ntk'][-1], step_current)
             logger.writer.add_scalar("TE/Linear_Regions", te_reward_generator._buffers['region'][-1], step_current)
@@ -367,7 +378,6 @@ def main(xargs, nas_bench):
         elif xargs.search_space_name == 'darts':
             genotype = policy.genotype(arch)
             probs = policy()
-            _start_time = time.time()
             reward = te_reward_generator.step(arch)
             logger.writer.add_scalar("TE/NTK", te_reward_generator._buffers['ntk'][-1], step_current)
             logger.writer.add_scalar("TE/Linear_Regions", te_reward_generator._buffers['region'][-1], step_current)
@@ -385,13 +395,13 @@ def main(xargs, nas_bench):
         optimizer.step()
         step_current += 1
         logger.log('step [{:3d}] : average-reward={:.3f} : policy_loss={:.4f}'.format(_step, baseline.value(), policy_loss.item()))
-        if xargs.search_space_name == 'nas-bench-101':
-            time_elapsed = time.time()-start_time
-            num_unique_samples = len(arch_enum)
-            # logger.log('step [{:3d}] : accuracy {}'.format(_step, accuracy))
-            logger.log(f'Wallclock: {time_elapsed:.3f}, Num: {num_unique_samples}, Step: [{_step:3d}], Valid: {accuracy:.4f} (Best: {accuracy_best:.4f}), Test: {accuracy_test:.4f} (Best: {accuracy_test_best:.4f})')
+        # if xargs.search_space_name == 'nas-bench-101':
+        #     time_elapsed = time.time()-start_time
+        #     num_unique_samples = len(arch_enum)
+        #     # logger.log('step [{:3d}] : accuracy {}'.format(_step, accuracy))
+        #     logger.log(f'Wallclock: {time_elapsed:.3f}, Num: {num_unique_samples}, Step: [{_step:3d}], Valid: {accuracy:.4f} (Best: {accuracy_best:.4f}), Test: {accuracy_test:.4f} (Best: {accuracy_test_best:.4f})')
 
-        elif xargs.search_space_name == 'nas-bench-201':
+        if xargs.search_space_name == 'nas-bench-201':
             arch_idx = nas_bench.query_index_by_arch(policy.genotype())
             archinfo = nas_bench.query_meta_info_by_index(arch_idx)
             accuracy = archinfo.get_metrics(dataname, 'x-valid')['accuracy']
@@ -435,7 +445,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     # if args.rand_seed is None or args.rand_seed < 0: args.rand_seed = random.randint(1, 100000)
     # if args.arch_nas_dataset is None or not os.path.isfile(args.arch_nas_dataset):
-    for args.rand_seed in [1, 11, 101, 1001]:
+    for args.rand_seed in range(10):
         if args.arch_nas_dataset is None or not os.path.isfile(args.arch_nas_dataset) or (
                     args.search_space_name != 'nas-bench-201' and args.search_space_name != 'nas-bench-101'):
             nas_bench = None
