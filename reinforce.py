@@ -135,8 +135,9 @@ class Policy(nn.Module):
 
 class Policy101(nn.Module):
 
-    def __init__(self, max_nodes, all_archs):
+    def __init__(self, max_nodes, all_archs_numpy):
         super(Policy101, self).__init__()
+        self.all_archs_numpy = all_archs_numpy
         # self.max_nodes    = max_nodes
         # self.search_space = deepcopy(search_space)
         # self.edge2index   = {}
@@ -145,26 +146,68 @@ class Policy101(nn.Module):
         #         node_str = '{:}<-{:}'.format(i, j)
         #         self.edge2index[ node_str ] = len(self.edge2index)
         self.arch_parameters_matrix = nn.Parameter( 1e-3*torch.randn(21, 2) )
-        self.arch_parameters_ops = nn.Parameter(1e-3 * torch.randn(5, 3))
+        self.arch_parameters_ops = nn.Parameter(1e-3 * torch.randn(5, 4))
 
     # def load_arch_params(self, arch_params):
     #     self.arch_parameters.data.copy_(arch_params)
 
-    def generate_arch(self, actions_matrix, actions_ops):
+    # def generate_arch(self, actions_matrix, actions_ops):
+    #     matrix = np.zeros((7,7)).astype(np.int)
+    #     k = 0
+    #     for z, i in enumerate(range(6, 0, -1)):
+    #         matrix[z,z+1:] = actions_matrix[k:k+i].cpu().numpy()
+    #         k += i
+    #     operations = [0] + [a+1 for a in actions_ops.cpu().numpy()] + [4]
+    #     matrix = tuple([tuple(m) for m in matrix])
+    #     operations = tuple(operations)
+    #     return matrix, operations
+
+    def check_arch(self, actions_matrix, actions_ops):
         matrix = np.zeros((7,7)).astype(np.int)
         k = 0
         for z, i in enumerate(range(6, 0, -1)):
-            matrix[z,z+1:] = actions_matrix[k:k+i]
+            matrix[z,z+1:] = actions_matrix[k:k+i].cpu().numpy()
             k += i
-        operations = [0] + [a+1 for a in actions_ops] + [4]
-        matrix = tuple([tuple(m) for m in matrix])
-        operations = tuple(operations)
-        return matrix, operations
+        ops = [a for a in actions_ops.cpu().numpy()]
+        exist_index = [i for (i, o) in enumerate(ops) if o != 0]
+        if exist_index == []:
+            return False
+        operations = np.array([0] + [ops[i] for i in exist_index] + [4])
+        exist_index_matrix = [0] + [i+1 for i in exist_index] + [6]
+        matrix = matrix[exist_index_matrix, :][:, exist_index_matrix]
+        arch = list(np.concatenate((matrix.flatten(), operations)))
+        if arch in self.all_archs_numpy:
+            matrix = tuple([tuple(m) for m in matrix])
+            operations = tuple(operations)
+            return matrix, operations
+        else:
+            return False
 
     def forward(self):
         alphas_matrix  = nn.functional.softmax(self.arch_parameters_matrix, dim=-1)
         alphas_ops = nn.functional.softmax(self.arch_parameters_ops, dim=-1)
         return alphas_matrix, alphas_ops
+
+def select_action_101(policy):
+    action_matrix = torch.zeros(21).type(torch.int64).cuda()
+    action_ops = torch.zeros(5).type(torch.int64).cuda()
+    probs_matrix, probs_ops = policy()
+    m_matrix = Categorical(probs_matrix)
+    m_ops = Categorical(probs_ops)
+    while True:
+        arch = policy.check_arch(action_matrix, action_ops)
+        if arch is not False:
+            break
+        else:
+            # probs_matrix, probs_ops = policy()
+            # m_matrix = Categorical(probs_matrix)
+            # m_ops = Categorical(probs_ops)
+            action_matrix = m_matrix.sample()
+            action_ops = m_ops.sample()
+    # arch = policy.generate_arch(action_matrix, action_ops)
+    return arch, m_matrix.log_prob(action_matrix), m_ops.log_prob(action_ops)
+
+    # return (m_matrix.log_prob(action_matrix), action_matrix.cpu().tolist()), (m_ops.log_prob(action_ops), action_ops.cpu().tolist())
 
 
 class ExponentialMovingAverage(object):
@@ -210,16 +253,6 @@ def select_action(policy):
         action = m.sample()
         return m.log_prob(action), action.cpu().tolist()
 
-def select_action_101(policy):
-    probs_matrix, probs_ops = policy()
-    # nas-bench-201
-    m_matrix = Categorical(probs_matrix)
-    action_matrix = m_matrix.sample()
-
-    m_ops = Categorical(probs_ops)
-    action_ops = m_ops.sample()
-    return (m_matrix.log_prob(action_matrix), action_matrix.cpu().tolist()), (m_ops.log_prob(action_ops), action_ops.cpu().tolist())
-
 
 def main(xargs, nas_bench):
     PID = os.getpid()
@@ -251,7 +284,8 @@ def main(xargs, nas_bench):
     if xargs.search_space_name == 'nas-bench-101':
         # search_space = get_search_spaces('cell', xargs.search_space_name)
         all_archs = list(nas_bench.keys())
-        policy    = Policy101(xargs.max_nodes, all_archs).cuda()
+        all_archs_numpy = [list(np.concatenate((np.array(matrix).flatten(), np.array(ops)))) for matrix, ops in all_archs]
+        policy    = Policy101(xargs.max_nodes, all_archs_numpy).cuda()
     elif xargs.search_space_name == 'nas-bench-201':
         search_space = get_search_spaces('cell', xargs.search_space_name)
         policy    = Policy(xargs.max_nodes, search_space).cuda()
@@ -277,21 +311,24 @@ def main(xargs, nas_bench):
     time_proxy_total = 0
     accuracy_best = 0
     accuracy_test_best = 0
-    total_steps = 500
+    total_steps = 300
     step_current = 0 # for tensorboard
     te_reward_generator = Buffer_Reward_Generator(xargs, xargs.search_space_name, None, train_data, valid_data, class_num)
 
     for _step in range(total_steps):
         print("<< ============== JOB (PID = %d) %s ============== >>"%(PID, '/'.join(xargs.save_dir.split("/")[-5:])))
         if xargs.search_space_name == 'nas-bench-101':
-            arch = []
-            while arch not in all_archs:
-                (log_prob_matrix, action_matrix), (log_prob_ops, action_ops) = select_action_101(policy)
-                # print(action_matrix, action_ops)
-                arch = policy.generate_arch(action_matrix, action_ops)  # CellStructure object for nas-bench-201, arch_params (Tensor) for DARTS
+            # arch = []
+            arch, log_prob_matrix, log_prob_ops = select_action_101(policy)
+            # while arch not in all_archs:
+            # (log_prob_matrix, action_matrix), (log_prob_ops, action_ops) = select_action_101(policy)
+            # while policy.check_arch(action_matrix, action_ops):
+            #     (log_prob_matrix, action_matrix), (log_prob_ops, action_ops) = select_action_101(policy)
+            #     # print(action_matrix, action_ops)
+            #     arch = policy.generate_arch(action_matrix, action_ops)  # CellStructure object for nas-bench-201, arch_params (Tensor) for DARTS
         else:
             log_prob, action = select_action(policy)
-            arch_enum.add(arch)
+        arch_enum.add(arch)
         if xargs.search_space_name == 'nas-bench-101':
             # arch_idx = nas_bench.query_index_by_arch(arch)
             # archinfo = nas_bench.query_meta_info_by_index(arch_idx)
@@ -342,12 +379,12 @@ def main(xargs, nas_bench):
         trace.append((reward, arch))
         baseline.update(reward)
         # calculate loss
-        policy_loss = ( -log_prob * (reward - baseline.value()) ).sum()
+        policy_loss = ( -log_prob_matrix * (reward - baseline.value()) ).sum() + ( -log_prob_ops * (reward - baseline.value()) ).sum()
         optimizer.zero_grad()
         policy_loss.backward()
         optimizer.step()
         step_current += 1
-        logger.log('step [{:3d}] : average-reward={:.3f} : policy_loss={:.4f} : {:}'.format(_step, baseline.value(), policy_loss.item(), policy.genotype()))
+        logger.log('step [{:3d}] : average-reward={:.3f} : policy_loss={:.4f}'.format(_step, baseline.value(), policy_loss.item()))
         if xargs.search_space_name == 'nas-bench-101':
             time_elapsed = time.time()-start_time
             num_unique_samples = len(arch_enum)
