@@ -2,7 +2,7 @@ import numpy as np
 import torch
 
 
-def get_ntk_n(loader, networks, loader_val=None, train_mode=False, num_batch=-1, num_classes=100):
+def get_ntk_n(loader, networks, loader_val=None, train_mode=False, num_batch=-1, num_classes=100, search_space_name=None):
     device = torch.cuda.current_device()
     ntks = []
     for network in networks:
@@ -36,9 +36,12 @@ def get_ntk_n(loader, networks, loader_val=None, train_mode=False, num_batch=-1,
                 for name, W in network.named_parameters():
                     if 'weight' in name and W.grad is not None:
                         grad.append(W.grad.view(-1).detach())
-                        # if "cell" in name:
-                        if "layers" in name:
-                            cellgrad.append(W.grad.view(-1).detach())
+                        if search_space_name == 'nas-bench-101':
+                            if "layers" in name:
+                                cellgrad.append(W.grad.view(-1).detach())
+                        elif search_space_name == 'nas-bench-201' or search_space_name == 'darts':
+                            if "cell" in name:
+                                cellgrad.append(W.grad.view(-1).detach())
                 grads_x[net_idx].append(torch.cat(grad, -1))
                 cellgrad = torch.cat(cellgrad, -1) if len(cellgrad) > 0 else torch.Tensor([0]).cuda()
                 if len(cellgrads_x[net_idx]) == 0:

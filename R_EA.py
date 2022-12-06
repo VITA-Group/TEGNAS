@@ -78,7 +78,7 @@ def mutate_arch_func_101(all_archs):
     The parent architecture is cloned and mutated to produce the child architecture. The child architecture is mutated by randomly switch one operation to another.
     """
     def mutate_arch_func(parent_arch):
-        result = parent_arch
+        result = []
         while result not in all_archs:
             adj, ops = deepcopy(parent_arch)
             adj = [list(a) for a in adj]
@@ -381,7 +381,7 @@ def population_diversity(population, space_name):
 
 
 def regularized_evolution(xargs, total_steps, step_current, sample_size, random_arch, mutate_arch, logger, PID,
-                          history, population, nas_bench, dataname, arch_enum, te_reward_generator=None):
+                          history, population, nas_bench, dataname, arch_enum, te_reward_generator=None, start_time=0):
     """Algorithm for regularized evolution (i.e. aging evolution).
 
     Follows "Algorithm 1" in Real et al. "Regularized Evolution for Image
@@ -400,11 +400,13 @@ def regularized_evolution(xargs, total_steps, step_current, sample_size, random_
 
     # Carry out evolution in cycles. Each cycle produces a model and removes another.
     time_cost_training = 0
+    accuracy_best = 0
+    accuracy_test_best = 0
 
     for _step in range(total_steps):
         best_arch, _ = best_of_sample(population, topk=2, sort=True)  # choose parent based on changing range out of samples
 
-        print("<< ============== JOB (PID = %d) %s ============== >>"%(PID, '/'.join(xargs.save_dir.split("/")[-5:])))
+        # print("<< ============== JOB (PID = %d) %s ============== >>"%(PID, '/'.join(xargs.save_dir.split("/")[-5:])))
 
         # Sample randomly chosen models from the current population.
         sample = np.random.choice(list(population), size=sample_size, replace=False)
@@ -426,14 +428,28 @@ def regularized_evolution(xargs, total_steps, step_current, sample_size, random_
         logger.writer.add_scalar("evolution/population_diversity", population_diversity(population, xargs.search_space_name), step_current)
 
         best_arch, best_type = best_of_sample(population, topk=2, sort=True)  # choose parent based on changing range out of samples
-        logger.log('step [{:3d}] : best of populuation {:} type={:} : {:}'.format(_step, best_arch.accuracy[best_type], best_type, best_arch.arch))
+        # logger.log('step [{:3d}] : best of populuation {:} type={:} : {:}'.format(_step, best_arch.accuracy[best_type], best_type, best_arch.arch))
         if xargs.search_space_name == 'nas-bench-101':
             accuracy = nas_bench[best_arch.arch]['scratch']['valid']['acc'][108]['avg']*100
             accuracy_test = nas_bench[best_arch.arch]['scratch']['test']['acc'][108]['avg']*100
-            logger.log('samples: {}, step [{:3d}] => valid accuracy of population {}'.format(len(arch_enum), _step, accuracy))
-            logger.log('samples: {}, step [{:3d}] => test accuracy of population {}'.format(len(arch_enum), _step, accuracy_test))
+            if accuracy>accuracy_best: accuracy_best=accuracy
+            if accuracy_test>accuracy_test_best: accuracy_test_best=accuracy_test
+            # logger.log('samples: {}, step [{:3d}] => valid accuracy of population {}'.format(len(arch_enum), _step, accuracy))
+            # logger.log('samples: {}, step [{:3d}] => test accuracy of population {}'.format(len(arch_enum), _step, accuracy_test))
+            num_unique_samples = len(arch_enum)
+            if num_unique_samples > 500:
+                break
+            time_elapsed = time.time()-start_time
             logger.writer.add_scalar("accuracy/valid/derive", accuracy, step_current)
             logger.writer.add_scalar("accuracy/test/derive", accuracy_test, step_current)
+            logger.writer.add_scalar("accuracy/valid/derive/unique", accuracy, num_unique_samples)
+            logger.writer.add_scalar("accuracy/test/derive/unique", accuracy_test, num_unique_samples)
+            logger.writer.add_scalar("accuracy/best/valid/derive/unique", accuracy_best, num_unique_samples)
+            logger.writer.add_scalar("accuracy/best/test/derive/unique", accuracy_test_best, num_unique_samples)
+            logger.writer.add_scalar("accuracy/best/valid/derive/wallclock", accuracy_best, time_elapsed)
+            logger.writer.add_scalar("accuracy/best/test/derive/wallclock", accuracy_test_best, time_elapsed)
+            logger.log(f'Wallclock: {time_elapsed:.3f}, Num: {num_unique_samples}, Step: [{_step:3d}], Valid: {accuracy:.4f} (Best: {accuracy_best:.4f}), Test: {accuracy_test:.4f} (Best: {accuracy_test_best:.4f})')
+
         elif xargs.search_space_name == 'nas-bench-201':
             logger.log('step [{:3d}] => accuracy of population {}'.format(_step, nas_bench.query_meta_info_by_index(nas_bench.query_index_by_arch(best_arch.arch)).get_metrics(dataname, 'x-valid')['accuracy']))
             logger.writer.add_scalar("accuracy/derive", nas_bench.query_meta_info_by_index(nas_bench.query_index_by_arch(best_arch.arch)).get_metrics(dataname, 'x-valid')['accuracy'], step_current)
@@ -445,7 +461,7 @@ def main(xargs, nas_bench):
     if xargs.timestamp == 'none':
         # xargs.timestamp = "{:}".format(time.strftime('%h-%d-%C_%H-%M-%s', time.gmtime(time.time())))
         xargs.timestamp = "{:}".format(time.strftime('%m-%d-%Y-%H:%M%p', time.gmtime(time.time())))
-
+    start_time = time.time()
     assert torch.cuda.is_available(), 'CUDA is not available.'
     torch.backends.cudnn.enabled   = True
     torch.backends.cudnn.benchmark = False
@@ -497,7 +513,7 @@ def main(xargs, nas_bench):
     # Initialize the population with random models.
     arch_enum = set()
     while len(population) < xargs.ea_population_size:
-        print("<< ============== JOB (PID = %d) %s [Init population %d/%d] ============== >>"%(PID, '/'.join(xargs.save_dir.split("/")[-5:]), len(population), xargs.ea_population_size))
+        # print("<< ============== JOB (PID = %d) %s [Init population %d/%d] ============== >>"%(PID, '/'.join(xargs.save_dir.split("/")[-5:]), len(population), xargs.ea_population_size))
         model = Model()
         model.arch = random_arch()
         model.accuracy, _, _time_cost_training = proxy_inference(xargs, model.arch, nas_bench, logger, -1, dataname, te_reward_generator)
@@ -508,7 +524,7 @@ def main(xargs, nas_bench):
     #################################
 
     population, history, step_current, _time_cost_training = regularized_evolution(xargs, xargs.total_steps, step_current, xargs.ea_sample_size, random_arch, mutate_arch, logger, PID,
-                                                                                   history, population, nas_bench, dataname, arch_enum, te_reward_generator)
+                                                                                   history, population, nas_bench, dataname, arch_enum, te_reward_generator, start_time)
     time_cost_training += _time_cost_training
 
     total_time_cost = time.time() - start_time
@@ -544,13 +560,14 @@ if __name__ == '__main__':
     parser.add_argument('--te_buffer_size',        type=int,   default=10,   help='buffer size for TE reward generator')
     parser.add_argument('--super_type',       type=str, default='basic',  help='type of supernet: basic or nasnet-super')
     args = parser.parse_args()
-    if args.rand_seed is None or args.rand_seed < 0: args.rand_seed = random.randint(1, 100000)
-    if args.arch_nas_dataset is None or not os.path.isfile(args.arch_nas_dataset) or (args.search_space_name != 'nas-bench-201' and args.search_space_name != 'nas-bench-101'):
-        nas_bench = None
-    else:
-        print ('{:} build NAS-Benchmark-API from {:}'.format(time_string(), args.arch_nas_dataset))
-        if args.search_space_name == 'nas-bench-101':
-            nas_bench = torch.load(args.arch_nas_dataset)
+    # if args.rand_seed is None or args.rand_seed < 0: args.rand_seed = random.randint(1, 100000)
+    for args.rand_seed in [1, 11, 101, 1001]:
+        if args.arch_nas_dataset is None or not os.path.isfile(args.arch_nas_dataset) or (args.search_space_name != 'nas-bench-201' and args.search_space_name != 'nas-bench-101'):
+            nas_bench = None
         else:
-            nas_bench = API(args.arch_nas_dataset)
-    main(args, nas_bench)
+            print ('{:} build NAS-Benchmark-API from {:}'.format(time_string(), args.arch_nas_dataset))
+            if args.search_space_name == 'nas-bench-101':
+                nas_bench = torch.load(args.arch_nas_dataset)
+            else:
+                nas_bench = API(args.arch_nas_dataset)
+        main(args, nas_bench)

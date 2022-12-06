@@ -68,3 +68,8 @@ core_cmd = "CUDA_VISIBLE_DEVICES={gpuid} OMP_NUM_THREADS=4 python ./reinforce.py
 
 print(core_cmd)
 # os.system(core_cmd)
+
+# CUDA_VISIBLE_DEVICES=0 OMP_NUM_THREADS=4 python ./reinforce.py --save_dir ./output/search-cell-nas-bench-201/REINFORCE-cifar10
+# --max_nodes 4 --dataset cifar10 --data_path D:/DATASET/tegnas/cifar.python --search_space_name nas-bench-201
+# --super_type basic --arch_nas_dataset D:/DATASET/tegnas/NAS-Bench-201-v1_0-e61699.pth --track_running_stats 1
+# --workers 0 --rand_seed 0 --learning_rate 0.04 --EMA_momentum 0.9 --timestamp 12-05-2022-22:40PM

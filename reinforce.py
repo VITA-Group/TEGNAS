@@ -133,6 +133,39 @@ class Policy(nn.Module):
         alphas  = nn.functional.softmax(self.arch_parameters, dim=-1)
         return alphas
 
+class Policy101(nn.Module):
+
+    def __init__(self, max_nodes, all_archs):
+        super(Policy101, self).__init__()
+        # self.max_nodes    = max_nodes
+        # self.search_space = deepcopy(search_space)
+        # self.edge2index   = {}
+        # for i in range(1, max_nodes):
+        #     for j in range(i):
+        #         node_str = '{:}<-{:}'.format(i, j)
+        #         self.edge2index[ node_str ] = len(self.edge2index)
+        self.arch_parameters_matrix = nn.Parameter( 1e-3*torch.randn(21, 2) )
+        self.arch_parameters_ops = nn.Parameter(1e-3 * torch.randn(5, 3))
+
+    # def load_arch_params(self, arch_params):
+    #     self.arch_parameters.data.copy_(arch_params)
+
+    def generate_arch(self, actions_matrix, actions_ops):
+        matrix = np.zeros((7,7)).astype(np.int)
+        k = 0
+        for z, i in enumerate(range(6, 0, -1)):
+            matrix[z,z+1:] = actions_matrix[k:k+i]
+            k += i
+        operations = [0] + [a+1 for a in actions_ops] + [4]
+        matrix = tuple([tuple(m) for m in matrix])
+        operations = tuple(operations)
+        return matrix, operations
+
+    def forward(self):
+        alphas_matrix  = nn.functional.softmax(self.arch_parameters_matrix, dim=-1)
+        alphas_ops = nn.functional.softmax(self.arch_parameters_ops, dim=-1)
+        return alphas_matrix, alphas_ops
+
 
 class ExponentialMovingAverage(object):
     """Class that maintains an exponential moving average."""
@@ -177,12 +210,22 @@ def select_action(policy):
         action = m.sample()
         return m.log_prob(action), action.cpu().tolist()
 
+def select_action_101(policy):
+    probs_matrix, probs_ops = policy()
+    # nas-bench-201
+    m_matrix = Categorical(probs_matrix)
+    action_matrix = m_matrix.sample()
+
+    m_ops = Categorical(probs_ops)
+    action_ops = m_ops.sample()
+    return (m_matrix.log_prob(action_matrix), action_matrix.cpu().tolist()), (m_ops.log_prob(action_ops), action_ops.cpu().tolist())
+
 
 def main(xargs, nas_bench):
     PID = os.getpid()
     if xargs.timestamp == 'none':
         xargs.timestamp = "{:}".format(time.strftime('%h-%d-%C_%H-%M-%s', time.gmtime(time.time())))
-
+    start_time = time.time()
     assert torch.cuda.is_available(), 'CUDA is not available.'
     torch.backends.cudnn.enabled   = True
     torch.backends.cudnn.benchmark = False
@@ -201,11 +244,14 @@ def main(xargs, nas_bench):
     else:
         dataname = xargs.dataset
     train_data, valid_data, xshape, class_num = get_datasets(xargs.dataset, xargs.data_path, -1)
-    logger.log('||||||| {:10s} ||||||| Train-Loader-Num={:}, Valid-Loader-Num={:}'.format(xargs.dataset, len(train_data), len(valid_data)))
-    logger.log('||||||| {:10s} |||||||'.format(xargs.dataset))
+    # logger.log('||||||| {:10s} ||||||| Train-Loader-Num={:}, Valid-Loader-Num={:}'.format(xargs.dataset, len(train_data), len(valid_data)))
+    # logger.log('||||||| {:10s} |||||||'.format(xargs.dataset))
 
     search_space = get_search_spaces('cell', xargs.search_space_name)
-    if xargs.search_space_name == 'nas-bench-201':
+    if xargs.search_space_name == 'nas-bench-101':
+        all_archs = list(nas_bench.keys())
+        policy    = Policy101(xargs.max_nodes, all_archs).cuda()
+    elif xargs.search_space_name == 'nas-bench-201':
         policy    = Policy(xargs.max_nodes, search_space).cuda()
     elif xargs.search_space_name == 'darts':
         policy    = Policy_DARTS(xargs.max_nodes, search_space).cuda()
@@ -218,24 +264,51 @@ def main(xargs, nas_bench):
     logger.log('eps       : {:}'.format(eps))
 
     # nas dataset load
-    logger.log('{:} use nas_bench : {:}'.format(time_string(), nas_bench))
-
+    # logger.log('{:} use nas_bench : {:}'.format(time_string(), nas_bench))
+    arch_enum = set()
     # REINFORCE
     x_start_time = time.time()
     trace = []
     accuracy_history = [] # for 201: save gt accuracy
     start_time = time.time()
     time_proxy_total = 0
+    accuracy_best = 0
+    accuracy_test_best = 0
     total_steps = 500
     step_current = 0 # for tensorboard
-    te_reward_generator = Buffer_Reward_Generator(xargs, xargs.search_space_name, search_space, train_loader, valid_loader, class_num)
+    te_reward_generator = Buffer_Reward_Generator(xargs, xargs.search_space_name, search_space, train_data, valid_data, class_num)
+
     for _step in range(total_steps):
         print("<< ============== JOB (PID = %d) %s ============== >>"%(PID, '/'.join(xargs.save_dir.split("/")[-5:])))
-        log_prob, action = select_action(policy)
-        print(action)
-        arch = policy.generate_arch(action)  # CellStructure object for nas-bench-201, arch_params (Tensor) for DARTS
-
-        if xargs.search_space_name == 'nas-bench-201':
+        if xargs.search_space_name == 'nas-bench-101':
+            arch = []
+            while arch not in all_archs:
+                (log_prob_matrix, action_matrix), (log_prob_ops, action_ops) = select_action_101(policy)
+                # print(action_matrix, action_ops)
+                arch = policy.generate_arch(action_matrix, action_ops)  # CellStructure object for nas-bench-201, arch_params (Tensor) for DARTS
+        else:
+            log_prob, action = select_action(policy)
+            arch_enum.add(arch)
+        if xargs.search_space_name == 'nas-bench-101':
+            # arch_idx = nas_bench.query_index_by_arch(arch)
+            # archinfo = nas_bench.query_meta_info_by_index(arch_idx)
+            # accuracy = archinfo.get_metrics(dataname, 'x-valid')['accuracy']
+            accuracy = nas_bench[arch]['scratch']['valid']['acc'][108]['avg'] * 100
+            accuracy_test = nas_bench[arch]['scratch']['test']['acc'][108]['avg']*100
+            if accuracy>accuracy_best: accuracy_best=accuracy
+            if accuracy_test>accuracy_test_best: accuracy_test_best=accuracy_test
+            accuracy_history.append(accuracy)
+            logger.writer.add_scalar("accuracy/search", accuracy, step_current)
+            _start_time = time.time()
+            reward = te_reward_generator.step(arch, space_name=xargs.search_space_name)
+            logger.writer.add_scalar("TE/NTK", te_reward_generator._buffers['ntk'][-1], step_current)
+            logger.writer.add_scalar("TE/Linear_Regions", te_reward_generator._buffers['region'][-1], step_current)
+            logger.writer.add_scalar("TE/MSE", te_reward_generator._buffers['mse'][-1], step_current)
+            logger.writer.add_scalar("accuracy/derive", accuracy, step_current)
+            logger.writer.add_scalar("accuracy_test/derive", accuracy_test, step_current)
+            probs = policy()
+            logger.writer.add_scalar("reinforce/entropy", -(torch.log(probs) * probs).sum(1).mean(0), step_current)
+        elif xargs.search_space_name == 'nas-bench-201':
             arch_idx = nas_bench.query_index_by_arch(arch)
             archinfo = nas_bench.query_meta_info_by_index(arch_idx)
             accuracy = archinfo.get_metrics(dataname, 'x-valid')['accuracy']
@@ -270,7 +343,13 @@ def main(xargs, nas_bench):
         optimizer.step()
         step_current += 1
         logger.log('step [{:3d}] : average-reward={:.3f} : policy_loss={:.4f} : {:}'.format(_step, baseline.value(), policy_loss.item(), policy.genotype()))
-        if xargs.search_space_name == 'nas-bench-201':
+        if xargs.search_space_name == 'nas-bench-101':
+            time_elapsed = time.time()-start_time
+            num_unique_samples = len(arch_enum)
+            # logger.log('step [{:3d}] : accuracy {}'.format(_step, accuracy))
+            logger.log(f'Wallclock: {time_elapsed:.3f}, Num: {num_unique_samples}, Step: [{_step:3d}], Valid: {accuracy:.4f} (Best: {accuracy_best:.4f}), Test: {accuracy_test:.4f} (Best: {accuracy_test_best:.4f})')
+
+        elif xargs.search_space_name == 'nas-bench-201':
             arch_idx = nas_bench.query_index_by_arch(policy.genotype())
             archinfo = nas_bench.query_meta_info_by_index(arch_idx)
             accuracy = archinfo.get_metrics(dataname, 'x-valid')['accuracy']
@@ -279,7 +358,10 @@ def main(xargs, nas_bench):
     end_time = time.time()
     logger.log('REINFORCE finish with {:} steps | time cost {:.1f} s'.format(total_steps, end_time-start_time))
 
-    if xargs.search_space_name == 'nas-bench-201':
+    if xargs.search_space_name == 'nas-bench-101':
+        best_idx = te_reward_generator._buffer_rank_best()
+        logger.log('101 best of history: {}'.format(accuracy_history[best_idx]))
+    elif xargs.search_space_name == 'nas-bench-201':
         best_idx = te_reward_generator._buffer_rank_best()
         logger.log('201 best of history: {}'.format(accuracy_history[best_idx]))
 
@@ -309,10 +391,16 @@ if __name__ == '__main__':
     parser.add_argument('--te_buffer_size',        type=int,   default=10,   help='buffer size for TE reward generator')
     parser.add_argument('--super_type',       type=str, default='basic',  help='type of supernet: basic or nasnet-super')
     args = parser.parse_args()
-    if args.rand_seed is None or args.rand_seed < 0: args.rand_seed = random.randint(1, 100000)
-    if args.arch_nas_dataset is None or not os.path.isfile(args.arch_nas_dataset):
-        nas_bench = None
-    else:
-        print ('{:} build NAS-Benchmark-API from {:}'.format(time_string(), args.arch_nas_dataset))
-        nas_bench = API(args.arch_nas_dataset)
-    main(args, nas_bench)
+    # if args.rand_seed is None or args.rand_seed < 0: args.rand_seed = random.randint(1, 100000)
+    # if args.arch_nas_dataset is None or not os.path.isfile(args.arch_nas_dataset):
+    for args.rand_seed in [1, 11, 101, 1001]:
+        if args.arch_nas_dataset is None or not os.path.isfile(args.arch_nas_dataset) or (
+                    args.search_space_name != 'nas-bench-201' and args.search_space_name != 'nas-bench-101'):
+            nas_bench = None
+        else:
+            print ('{:} build NAS-Benchmark-API from {:}'.format(time_string(), args.arch_nas_dataset))
+            if args.search_space_name == 'nas-bench-101':
+                nas_bench = torch.load(args.arch_nas_dataset)
+            else:
+                nas_bench = API(args.arch_nas_dataset)
+        main(args, nas_bench)

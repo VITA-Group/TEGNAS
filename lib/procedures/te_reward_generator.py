@@ -240,11 +240,11 @@ class Buffer_Reward_Generator(object):
 
         ntks = [0]; mses = [0]; LRs = [0]
         if  'ntk' in self._reward_types and 'mse' in self._reward_types:
-            ntks, mses = get_ntk_n(self._ntk_input_data, self._networks, loader_val=self._ntk_target_data, train_mode=True, num_batch=1, num_classes=self._class_num)
+            ntks, mses = get_ntk_n(self._ntk_input_data, self._networks, loader_val=self._ntk_target_data, train_mode=True, num_batch=1, num_classes=self._class_num, search_space_name=xargs.search_space_name)
         elif 'ntk' in self._reward_types:
-            ntks = get_ntk_n(self._ntk_input_data, self._networks, train_mode=True, num_batch=1, num_classes=self._class_num)
+            ntks = get_ntk_n(self._ntk_input_data, self._networks, train_mode=True, num_batch=1, num_classes=self._class_num, search_space_name=xargs.search_space_name)
         elif 'mse' in self._reward_types:
-            _, mses = get_ntk_n(self._ntk_input_data, self._networks, loader_val=self._ntk_target_data, train_mode=True, num_batch=1, num_classes=self._class_num)
+            _, mses = get_ntk_n(self._ntk_input_data, self._networks, loader_val=self._ntk_target_data, train_mode=True, num_batch=1, num_classes=self._class_num, search_space_name=xargs.search_space_name)
         if 'region' in self._reward_types:
             with torch.no_grad():
                 region_model.reinit(models=self._networks_thin, seed=xargs.rand_seed)
@@ -292,7 +292,8 @@ class Buffer_Reward_Generator(object):
         _reward = 0
         if len(self._buffers[self._reward_types[0]]) <= 1:
             # dummy reward for step 0
-            return 0, self.reward_type2index[self._reward_types[0]]
+            # return 0, self.reward_type2index[self._reward_types[0]]
+            return 0
         type_reward = [] # tuples of (type, reward)
         for _type in self._reward_types:
             var = self._buffers_change[_type][-1]
