@@ -99,6 +99,10 @@ def get_ntk_n(loader, networks, loader_val=None, train_mode=False, num_batch=-1,
             grads = torch.stack(grads, 0)
             cellgrads_y[_i] = grads
         for net_idx in range(len(networks)):
+            if cellgrads_y[net_idx].sum() == 0 or cellgrads_x[net_idx].sum() == 0:
+                # bad gradients
+                prediction_mses.append(-1)
+                continue
             try:
                 _ntk_yx = torch.einsum('nc,mc->nm', [cellgrads_y[net_idx], cellgrads_x[net_idx]])
                 PY = torch.einsum('jk,kl,lm->jm', _ntk_yx, torch.inverse(ntk_cell_x[net_idx]), targets_x_onehot_mean)
